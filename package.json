@@ -1,0 +1,19 @@
+{
+  "name": "webos-proxy",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Text-mode web fetch proxy for the VectoJS WebOS Browser app (Cloudflare Worker).",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "check": "tsc --noEmit",
+    "lint": "oxlint src"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250814.0",
+    "oxlint": "^1.78.0",
+    "typescript": "^7.0.2",
+    "wrangler": "^4.123.0"
+  }
+}

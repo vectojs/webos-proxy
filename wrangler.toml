@@ -1,0 +1,13 @@
+name = "webos-proxy"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+
+# Serve proxy.vectojs.org on the vectojs.org zone. The hostname needs a
+# proxied DNS record (placeholder A 192.0.2.1) on that zone — the Worker
+# route intercepts before any origin is contacted.
+routes = [
+  { pattern = "proxy.vectojs.org", zone_id = "e221cc18a57003bb6bef3d34605ffb1e" }
+]
+
+[observability]
+enabled = true
