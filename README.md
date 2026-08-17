@@ -16,7 +16,8 @@ Response:
 {
   "url": "https://example.com/",
   "title": "Example Domain",
-  "text": "Example Domain\n\nThis domain is for use…"
+  "text": "Example Domain\n\nThis domain is for use…",
+  "truncated": false
 }
 ```
 
@@ -26,7 +27,11 @@ Response:
 - A hostname blocklist rejects private/loopback/link-local/CLI-metadata hosts
   (SSRF guard). It does **not** resolve DNS, so a public hostname resolving to
   a private IP is not caught — demo-scoped, not a general open proxy.
-- Responses are capped at 256 KiB and constrained to text/* content types.
+- The upstream body is streamed and capped at 2 MiB (the reader is cancelled at
+  the ceiling, so memory never exceeds it); text output is capped at 8000 chars
+  and `truncated: true` flags a page that hit the ceiling. Content is
+  constrained to text/* and _html_ types, and nav/header/footer/aside/form
+  blocks are dropped before extraction so article text is not crowded out.
 
 ## Develop
 
