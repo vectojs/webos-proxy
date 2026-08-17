@@ -41,5 +41,18 @@ bun run deploy     # wrangler deploy (route: proxy.vectojs.org)
 ## Deploy
 
 Push to `main` → CI runs `verify` then `deploy` (wrangler) to the
-`proxy.vectojs.org` route on the `vectojs.org` zone. Requires the
-`CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` repo secrets.
+`webos-proxy` worker. Requires the `CLOUDFLARE_API_TOKEN` +
+`CLOUDFLARE_ACCOUNT_ID` repo secrets (org-level).
+
+The `proxy.vectojs.org` hostname is a **Workers custom domain** attached
+one-time to the `webos-proxy` service (the token lacks Zone Workers Routes
+scope, so a zone `route` in `wrangler.toml` is not used). The attachment
+auto-created the proxied DNS record on the `vectojs.org` zone. To re-attach
+(or move) it:
+
+```bash
+curl -X PUT "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/domains" \
+  -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"hostname":"proxy.vectojs.org","service":"webos-proxy","environment":"production","zone_id":"e221cc18a57003bb6bef3d34605ffb1e"}'
+```
