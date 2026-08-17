@@ -3,7 +3,7 @@
  *
  * A text-mode fetch proxy for the WebOS Browser app: fetches a URL
  * server-side (so the browser sidesteps CORS), strips HTML to plain text,
- * and returns `{ title, text }` with permissive CORS headers.
+ * and returns `{ title, text, truncated }` with permissive CORS headers.
  *
  * Security notes:
  * - Only `http:`/`https:` targets are allowed.
@@ -11,11 +11,13 @@
  *   hosts and IP literals (SSRF guard). It does NOT resolve DNS, so a public
  *   hostname that resolves to a private IP is not caught — keep this proxy
  *   demo-scoped, not a general-purpose open proxy.
- * - Responses are capped and the content type is constrained to text/html
- *   and text/* so binary bodies are never forwarded.
+ * - The upstream body is streamed and capped at `MAX_READ_BYTES` (the reader
+ *   is cancelled once the ceiling is hit, so we never buffer more than that),
+ *   and the content type is constrained to text/* and *html* so binary bodies
+ *   are never forwarded.
  */
 
-const MAX_BYTES = 256 * 1024;
+const MAX_READ_BYTES = 2 * 1024 * 1024;
 const MAX_TEXT = 8000;
 
 const CORS_HEADERS: Record<string, string> = {
@@ -30,7 +32,7 @@ const CORS_HEADERS: Record<string, string> = {
 const BLOCKED_IPV4_PREFIX =
   /^(0\.|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2[0-9]|3[01])\.|100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.)/;
 
-function isBlockedHost(hostname: string): boolean {
+export function isBlockedHost(hostname: string): boolean {
   const h = hostname.toLowerCase();
   // IPv6 literals arrive bracketed from URL.hostname.
   if (h === "[::1]" || h === "[::]") return true;
@@ -46,7 +48,7 @@ function json(data: unknown, status = 200): Response {
 }
 
 /** Decode the common HTML entities — enough for a readable text-mode view. */
-function decodeEntities(s: string): string {
+export function decodeEntities(s: string): string {
   return s
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
@@ -58,14 +60,20 @@ function decodeEntities(s: string): string {
     .replace(/&#(\d+);/g, (_m, d: string) => String.fromCodePoint(Number(d)));
 }
 
-/** Strip scripts/styles/comments/tags from HTML into readable plain text. */
-function htmlToText(html: string): { title: string; text: string } {
+/**
+ * Strip scripts/styles/nav/header/footer/forms/comments/tags from HTML into
+ * readable plain text. Nav/header/footer/aside/form are removed whole — on a
+ * Wikipedia-style page they are link farms that would otherwise crowd out the
+ * article text before the output cap is reached.
+ */
+export function htmlToText(html: string): { title: string; text: string } {
   const titleMatch = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html);
   const title = titleMatch ? decodeEntities(titleMatch[1] ?? "").trim() : "";
 
   const body = html
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<(nav|header|footer|aside|form)[\s\S]*?<\/\1>/gi, " ")
     .replace(/<head[\s\S]*?<\/head>/gi, " ")
     .replace(/<!--[\s\S]*?-->/g, " ")
     .replace(/<br\s*\/?>/gi, "\n")
@@ -81,6 +89,47 @@ function htmlToText(html: string): { title: string; text: string } {
     .join("\n");
 
   return { title, text };
+}
+
+/**
+ * Read a response body up to `maxBytes`, cancelling the reader once the
+ * ceiling is hit so we never buffer more than that regardless of the
+ * upstream's true size.
+ */
+export async function readUpTo(
+  body: ReadableStream<Uint8Array> | null,
+  maxBytes: number,
+): Promise<{ text: string; truncated: boolean }> {
+  if (!body) return { text: "", truncated: false };
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  let truncated = false;
+  try {
+    while (total < maxBytes) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const remaining = maxBytes - total;
+      if (value.length > remaining) {
+        chunks.push(value.subarray(0, remaining));
+        total += remaining;
+        truncated = true;
+        await reader.cancel();
+        break;
+      }
+      chunks.push(value);
+      total += value.length;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return { text: new TextDecoder().decode(bytes), truncated };
 }
 
 export default {
@@ -128,16 +177,16 @@ export default {
       return json({ error: `unsupported content type: ${contentType}` }, 415);
     }
 
-    const raw = await upstream.text();
-    if (raw.length > MAX_BYTES) {
-      return json({ error: "response too large" }, 413);
-    }
-
+    const { text: raw, truncated } = await readUpTo(
+      upstream.body,
+      MAX_READ_BYTES,
+    );
     const { title, text } = htmlToText(raw);
     return json({
       url: upstream.url,
       title: title || parsed.hostname,
       text: text.slice(0, MAX_TEXT),
+      truncated,
     });
   },
 };

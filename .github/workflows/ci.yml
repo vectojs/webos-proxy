@@ -17,6 +17,7 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run check
       - run: bun run lint
+      - run: bun run test
 
   deploy:
     name: Deploy
