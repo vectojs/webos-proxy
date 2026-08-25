@@ -217,6 +217,9 @@ export default {
     // The upstream HTTP status rides along (issue #39) so the app can tell a
     // real page from an anti-bot block: on 403/412-style answers the body is
     // the site's own challenge page and must never be shown as content.
+    // Accepted limitation: this response is still HTTP 200 and the challenge
+    // body is not sniffed out here (unreliable) — a client that ignores the
+    // relayed `status` renders that body as ordinary content.
     return json({
       url: upstream.url,
       status: upstream.status,

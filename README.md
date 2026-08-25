@@ -26,6 +26,12 @@ Response:
 can tell a real page from an anti-bot block: on 403/412-style answers the body
 is the site's own challenge page and must not be shown as content.
 
+Accepted limitation (issue #39): this Worker always answers with its own HTTP
+200 and does not judge the stripped body — telling a challenge page from real
+content would require sniffing page markup, which is unreliable by design.
+Detection is therefore the client's job via the relayed `status`; a client
+that ignores it renders the challenge text as ordinary content.
+
 ## Security
 
 - Only `http:`/`https:` targets are allowed.
