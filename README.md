@@ -15,11 +15,22 @@ Response:
 ```json
 {
   "url": "https://example.com/",
+  "status": 200,
   "title": "Example Domain",
   "text": "Example Domain\n\nThis domain is for use…",
   "truncated": false
 }
 ```
+
+`status` mirrors the upstream site's HTTP status (after redirects), so clients
+can tell a real page from an anti-bot block: on 403/412-style answers the body
+is the site's own challenge page and must not be shown as content.
+
+Accepted limitation (issue #39): this Worker always answers with its own HTTP
+200 and does not judge the stripped body — telling a challenge page from real
+content would require sniffing page markup, which is unreliable by design.
+Detection is therefore the client's job via the relayed `status`; a client
+that ignores it renders the challenge text as ordinary content.
 
 ## Security
 
@@ -32,6 +43,10 @@ Response:
   and `truncated: true` flags a page that hit the ceiling. Content is
   constrained to text/* and _html_ types, and nav/header/footer/aside/form
   blocks are dropped before extraction so article text is not crowded out.
+- Outbound requests carry a browser-grade Chrome navigation header set
+  (UA + Accept + Accept-Language + Sec-Fetch-\*/Sec-CH-UA\*). That is normal
+  browser presentation, nothing more: no cookies are stored or sent and no
+  Referer is forged.
 
 ## Develop
 

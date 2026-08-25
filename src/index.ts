@@ -47,6 +47,41 @@ function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), { status, headers: CORS_HEADERS });
 }
 
+/**
+ * Outbound headers shaped like a real desktop-Chrome navigation typed into an
+ * address bar (issue vectojs/webos#39). Strict sites (bilibili 风控, …)
+ * reject requests that lack the header set every real browser sends, and had
+ * been answering our bare `VectoJS-WebOS-Proxy` UA with 412 anti-bot pages.
+ *
+ * This is standard presentation — what any browser honestly announces about
+ * itself — not deception beyond it: no cookie jar, no Referer (a fresh
+ * navigation has neither), no forged history. `accept-encoding` stays unset
+ * on purpose: Workers add gzip/br themselves and decompress transparently.
+ *
+ * Keep the Chrome major version consistent across `user-agent` and
+ * `sec-ch-ua*`; mismatched versions are themselves a bot signal. Revisit the
+ * pinned version every few months (current stable when written: 151).
+ */
+export function browserRequestHeaders(): Record<string, string> {
+  return {
+    "user-agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.117 Safari/537.36",
+    accept:
+      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+    "accept-language": "en-US,en;q=0.9",
+    "sec-ch-ua":
+      '"Google Chrome";v="151", "Chromium";v="151", "Not)A;Brand";v="24"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"Windows"',
+    "sec-fetch-dest": "document",
+    "sec-fetch-mode": "navigate",
+    "sec-fetch-site": "none",
+    // Address-bar navigations are user-activated by definition.
+    "sec-fetch-user": "?1",
+    "upgrade-insecure-requests": "1",
+  };
+}
+
 /** Decode the common HTML entities — enough for a readable text-mode view. */
 export function decodeEntities(s: string): string {
   return s
@@ -163,10 +198,7 @@ export default {
     try {
       upstream = await fetch(target, {
         redirect: "follow",
-        headers: {
-          "user-agent": "VectoJS-WebOS-Proxy/0.1 (+https://webos.vectojs.org)",
-          accept: "text/html, text/plain;q=0.9, */*;q=0.5",
-        },
+        headers: browserRequestHeaders(),
       });
     } catch {
       return json({ error: "fetch failed" }, 502);
@@ -182,8 +214,15 @@ export default {
       MAX_READ_BYTES,
     );
     const { title, text } = htmlToText(raw);
+    // The upstream HTTP status rides along (issue #39) so the app can tell a
+    // real page from an anti-bot block: on 403/412-style answers the body is
+    // the site's own challenge page and must never be shown as content.
+    // Accepted limitation: this response is still HTTP 200 and the challenge
+    // body is not sniffed out here (unreliable) — a client that ignores the
+    // relayed `status` renders that body as ordinary content.
     return json({
       url: upstream.url,
+      status: upstream.status,
       title: title || parsed.hostname,
       text: text.slice(0, MAX_TEXT),
       truncated,
