@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import {
+import worker, {
+  browserRequestHeaders,
   decodeEntities,
   htmlToText,
   isBlockedHost,
@@ -59,6 +60,75 @@ describe("isBlockedHost", () => {
   test("allows public hosts", () => {
     const allowed = ["example.com", "11.0.0.1", "172.32.0.1", "100.63.0.1"];
     for (const h of allowed) expect(isBlockedHost(h), h).toBe(false);
+  });
+});
+
+describe("browserRequestHeaders", () => {
+  test("shapes a credible Chrome navigation request", () => {
+    const h = browserRequestHeaders();
+    expect(h["user-agent"]!.startsWith("Mozilla/5.0")).toBe(true);
+    expect(h["user-agent"]).toContain("Chrome/");
+    expect(h["accept"]!.startsWith("text/html")).toBe(true);
+    expect(h["accept-language"]).toContain("en");
+    // Address-bar navigation shape: user-activated top-level document load.
+    expect(h["sec-fetch-dest"]).toBe("document");
+    expect(h["sec-fetch-mode"]).toBe("navigate");
+    expect(h["sec-fetch-site"]).toBe("none");
+    expect(h["sec-fetch-user"]).toBe("?1");
+    expect(h["upgrade-insecure-requests"]).toBe("1");
+  });
+
+  test("keeps client-hint versions consistent with the user agent", () => {
+    const h = browserRequestHeaders();
+    const major = /Chrome\/(\d+)/.exec(h["user-agent"]!)?.[1];
+    expect(major).toBeTruthy();
+    expect(h["sec-ch-ua"]).toContain(`v="${major}"`);
+    expect(h["sec-ch-ua-mobile"]).toBe("?0");
+    expect(h["sec-ch-ua-platform"]).toBe('"Windows"');
+  });
+
+  test("sends no cookie or referer (no jar, fresh navigation)", () => {
+    const keys = Object.keys(browserRequestHeaders());
+    expect(keys).not.toContain("cookie");
+    expect(keys).not.toContain("referer");
+  });
+});
+
+describe("fetch handler", () => {
+  test("passes the upstream status through for blocked pages", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response("<html><body>由于触发安全风控策略</body></html>", {
+        status: 412,
+        headers: { "content-type": "text/html" },
+      })) as typeof fetch;
+    try {
+      const res = await worker.fetch(
+        new Request("https://proxy.example/?url=https%3A%2F%2Fexample.com"),
+      );
+      const body = (await res.json()) as { status?: number; text?: string };
+      expect(body.status).toBe(412);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("reports status 200 on a normal page", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response("<html><title>t</title><body>hello</body></html>", {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      })) as typeof fetch;
+    try {
+      const res = await worker.fetch(
+        new Request("https://proxy.example/?url=https%3A%2F%2Fexample.com"),
+      );
+      const body = (await res.json()) as { status?: number };
+      expect(body.status).toBe(200);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });
 
